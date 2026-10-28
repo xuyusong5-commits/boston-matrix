@@ -810,6 +810,7 @@ def build_figure(matrix: Matrix) -> go.Figure:
 
     xmin, xmax = matrix.x_limits
     ymin, ymax = matrix.y_limits
+    # 十字线用数据均值，不用坐标范围的中点。均值偏在一侧时，线也会偏在一侧。
     x_mean = float(matrix.x_mean)
     y_mean = float(matrix.y_mean)
     shapes = []
@@ -818,6 +819,8 @@ def build_figure(matrix: Matrix) -> go.Figure:
         shapes.append(
             dict(
                 type="rect",
+                xref="x",
+                yref="y",
                 x0=x_mean if spec.high_x else xmin,
                 x1=xmax if spec.high_x else x_mean,
                 y0=y_mean if spec.high_y else ymin,
@@ -829,8 +832,8 @@ def build_figure(matrix: Matrix) -> go.Figure:
             )
         )
     for shape in (
-        dict(type="line", x0=x_mean, x1=x_mean, y0=ymin, y1=ymax),
-        dict(type="line", x0=xmin, x1=xmax, y0=y_mean, y1=y_mean),
+        dict(type="line", xref="x", yref="y", x0=x_mean, x1=x_mean, y0=ymin, y1=ymax),
+        dict(type="line", xref="x", yref="y", x0=xmin, x1=xmax, y0=y_mean, y1=y_mean),
     ):
         shape["line"] = dict(color=PALETTE["cross"], width=3, dash="solid")
         # simple_white 的形状默认只有 0.3 透明度，十字线会发虚。

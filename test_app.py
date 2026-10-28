@@ -70,6 +70,33 @@ class MatrixLogicTest(unittest.TestCase):
         self.assertNotIn("月销量200%", texts)
         self.assertIn("评分3%", texts)
 
+    def test_crosshair_follows_the_mean_when_it_is_not_the_axis_midpoint(self) -> None:
+        frame = pd.DataFrame(
+            {
+                "name": ["凉菜", "例汤", "白米饭", "小食", "时蔬", "套餐", "可乐", "礼盒"],
+                "x": [10, 15, 20, 25, 30, 40, 50, 90],
+                "y": [98, 96, 94, 92, 90, 88, 30, 10],
+            }
+        )
+        matrix = app.build_matrix(frame, "点击率", "毛利率")
+        self.assertAlmostEqual(matrix.x_mean, 35)
+        self.assertAlmostEqual(matrix.y_mean, 74.75)
+        xmin, xmax = matrix.x_limits
+        ymin, ymax = matrix.y_limits
+        self.assertLess(matrix.x_mean, (xmin + xmax) / 2)
+        self.assertGreater(matrix.y_mean, (ymin + ymax) / 2)
+        self.assertLess((matrix.x_mean - xmin) / (xmax - xmin), 0.45)
+        self.assertGreater((matrix.y_mean - ymin) / (ymax - ymin), 0.55)
+        figure = app.build_figure(matrix)
+        vertical = next(shape for shape in figure.layout.shapes if shape.type == "line" and shape.x0 == shape.x1)
+        horizontal = next(shape for shape in figure.layout.shapes if shape.type == "line" and shape.y0 == shape.y1)
+        self.assertEqual(vertical.xref, "x")
+        self.assertEqual(horizontal.yref, "y")
+        self.assertAlmostEqual(float(vertical.x0), matrix.x_mean)
+        self.assertAlmostEqual(float(horizontal.y0), matrix.y_mean)
+        self.assertNotAlmostEqual(float(vertical.x0), (xmin + xmax) / 2, places=3)
+        self.assertNotAlmostEqual(float(horizontal.y0), (ymin + ymax) / 2, places=3)
+
     def test_ties_on_the_mean_fall_to_the_low_side(self) -> None:
         frame = pd.DataFrame({"name": ["甲", "乙"], "x": [1, 1], "y": [1, 3]})
         matrix = app.build_matrix(frame, "横轴", "纵轴")
