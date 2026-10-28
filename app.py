@@ -1015,6 +1015,13 @@ button[kind="secondary"], [data-testid="stBaseButton-secondary"] {
   font-size: 0.75rem;
   color: $muted;
 }
+section[data-testid="stSidebar"] [data-testid="stHorizontalBlock"]:has([data-testid="stFileUploader"]) {
+  align-items: center;
+}
+section[data-testid="stSidebar"] [data-testid="stDownloadButton"] button {
+  width: 100%;
+  white-space: nowrap;
+}
 [data-testid="stDataEditor"] {
   max-width: 820px;
   border-radius: 16px;
@@ -1319,21 +1326,6 @@ def _render_sidebar() -> None:
         st.button("载入示例", type="primary", on_click=_load_sample, width="stretch")
         st.button("清空表格", on_click=_clear_table, width="stretch")
         st.html('<p class="side-note">示例是一家社区餐厅的菜品，会覆盖当前表格和坐标名。</p>')
-        st.html('<p class="side-kicker">上传 CSV</p>')
-        upload = st.file_uploader(
-            "上传 CSV",
-            type=["csv"],
-            label_visibility="collapsed",
-            key=f"upload_{st.session_state.uploader_version}",
-        )
-        st.html('<p class="side-note">第一列是名称，后面两列是数字。表头会变成坐标名，UTF-8 和 GBK 都可以。</p>')
-        if upload is not None:
-            raw = upload.getvalue()
-            token = hashlib.sha256(raw).hexdigest()
-            if token != st.session_state.get("upload_token"):
-                st.session_state.pending_csv = raw
-                st.session_state.pending_token = token
-                st.rerun()
 
 
 def _render_main() -> None:
@@ -1367,12 +1359,6 @@ def _render_main() -> None:
     elif not isinstance(edited.index, pd.RangeIndex) or list(edited.columns) != ["name", "x", "y"]:
         edited = _work_frame(edited)
     st.session_state.table = edited
-    st.download_button(
-        "下载 CSV",
-        data=table_to_csv_bytes(edited, x_name, y_name),
-        file_name="四象限.csv",
-        mime="text/csv",
-    )
 
     matrix = build_matrix(edited, x_name, y_name)
     stats_slot.html(stats_html(matrix) + notice_html(matrix, st.session_state.get("banner")))
@@ -1380,6 +1366,38 @@ def _render_main() -> None:
     _show_chart(chart_slot, build_figure(matrix))
     cards_slot.html(cards_html(matrix))
     st.html('<p class="foot">数据只在这次打开的页面里计算，关掉就没有了。</p>')
+
+
+def _render_csv_controls() -> None:
+    """上传和下载放在同一行。此时表格已经是这一轮编辑后的结果。"""
+    x_name = axis_name(st.session_state.x_label, "横轴")
+    y_name = axis_name(st.session_state.y_label, "纵轴")
+    with st.sidebar:
+        st.html('<p class="side-kicker">上传与下载</p>')
+        upload_col, download_col = st.columns(2, gap="small")
+        with upload_col:
+            upload = st.file_uploader(
+                "上传 CSV",
+                type=["csv"],
+                label_visibility="collapsed",
+                key=f"upload_{st.session_state.uploader_version}",
+            )
+        with download_col:
+            st.download_button(
+                "下载 CSV",
+                data=table_to_csv_bytes(st.session_state.table, x_name, y_name),
+                file_name="四象限.csv",
+                mime="text/csv",
+                width="stretch",
+            )
+        st.html('<p class="side-note">第一列是名称，后面两列是数字。表头会变成坐标名，UTF-8 和 GBK 都可以。</p>')
+        if upload is not None:
+            raw = upload.getvalue()
+            token = hashlib.sha256(raw).hexdigest()
+            if token != st.session_state.get("upload_token"):
+                st.session_state.pending_csv = raw
+                st.session_state.pending_token = token
+                st.rerun()
 
 
 def main() -> None:
@@ -1395,6 +1413,7 @@ def main() -> None:
     st.html(f"<style>{build_css()}</style>")
     _render_sidebar()
     _render_main()
+    _render_csv_controls()
 
 
 if __name__ == "__main__":
