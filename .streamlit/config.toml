@@ -1,0 +1,33 @@
+[client]
+toolbarMode = "minimal"
+
+[browser]
+gatherUsageStats = false
+
+[server]
+maxUploadSize = 20
+
+[theme]
+base = "light"
+primaryColor = "#24382E"
+backgroundColor = "#F5F2EB"
+secondaryBackgroundColor = "#EFEAE2"
+textColor = "#1C2822"
+linkColor = "#2F6A4A"
+borderColor = "#E3DACE"
+baseRadius = "0.8rem"
+buttonRadius = "full"
+baseFontSize = 16
+showWidgetBorder = true
+showSidebarBorder = true
+dataframeBorderColor = "#E3DACE"
+dataframeHeaderBackgroundColor = "#F3EEE6"
+dataframeHeaderTextColor = "#1C2822"
+paddingTop = "1.15rem"
+paddingBottom = "2rem"
+chartCategoricalColors = ["#5F8F70", "#6D90B0", "#C1964E", "#B07B86"]
+
+[theme.sidebar]
+backgroundColor = "#EFEAE2"
+secondaryBackgroundColor = "#E7E1D6"
+borderColor = "#E3DACE"
