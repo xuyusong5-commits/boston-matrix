@@ -24,7 +24,7 @@ PALETTE = {
     "ink_soft": "#3E4943",
     "muted": "#6F685F",
     "line": "#E3DACE",
-    "cross": "#8F877C",
+    "cross": "#1E2A24",
     "primary": "#24382E",
     "green": "#5F8F70",
     "blue": "#6D90B0",
@@ -65,9 +65,9 @@ SAMPLE_ROWS = [
     ("儿童餐", 4.4, 19),
 ]
 
-CHART_HEIGHT = 540
-CHART_MARGIN = dict(l=108, r=36, t=28, b=54)
-PLOT_W = 860
+CHART_HEIGHT = 660
+CHART_MARGIN = dict(l=108, r=48, t=32, b=56)
+PLOT_W = 920
 PLOT_H = CHART_HEIGHT - CHART_MARGIN["t"] - CHART_MARGIN["b"]
 MAX_UPLOAD_ROWS = 300
 GENERIC_HEADERS = {"x", "y", "value", "数值", "横轴", "纵轴", "x轴", "y轴"}
@@ -251,6 +251,41 @@ def fmt_num(value: float | None) -> str:
     else:
         text = f"{magnitude:.3f}"
     return sign + text.rstrip("0").rstrip(".")
+
+
+def axis_kind(values: list[float]) -> str:
+    """0–1 的小数按比例换算成百分数；落在 0–100 的，直接当成百分率。"""
+    if not values:
+        return "number"
+    if all(0 <= value <= 1 for value in values) and any(0 < value < 1 for value in values):
+        return "proportion"
+    if all(0 <= value <= 100 for value in values):
+        return "percent"
+    return "number"
+
+
+def format_axis_value(value: float, kind: str) -> str:
+    if kind == "proportion":
+        return fmt_num(value * 100) + "%"
+    if kind == "percent":
+        return fmt_num(value) + "%"
+    return fmt_num(value)
+
+
+def axis_phrase(name: str, value: float, kind: str) -> str:
+    label = name.strip()
+    if kind in {"percent", "proportion"}:
+        for suffix in ("（%）", "(%)", "％", "%"):
+            if label.endswith(suffix):
+                label = label[: -len(suffix)].strip()
+                break
+    return f"{label}{format_axis_value(value, kind)}"
+
+
+def point_caption_lines(item: Item, matrix: Matrix, x_kind: str, y_kind: str) -> tuple[str, str]:
+    name = chart_name(item.name, 14)
+    detail = f"{axis_phrase(matrix.x_name, item.x, x_kind)}，{axis_phrase(matrix.y_name, item.y, y_kind)}"
+    return name, detail
 
 
 def chart_name(name: str, limit: int = 10) -> str:
@@ -469,23 +504,26 @@ def build_matrix(df: pd.DataFrame | None, x_name: str, y_name: str) -> Matrix:
 
 
 def layout_point_labels(matrix: Matrix) -> LabelLayout:
-    """把品名放在圆点旁，偏移用像素，避免换屏幕宽度时标签被轴距拉得很远。"""
+    """把「品名，横轴值，纵轴值」放在圆点旁。偏移用像素，避免被轴距拉远。"""
     if matrix.x_limits is None or matrix.y_limits is None or matrix.x_mean is None or matrix.y_mean is None:
-        return LabelLayout([], float(PLOT_W), float(PLOT_H), 11.0, 5.0)
+        return LabelLayout([], float(PLOT_W), float(PLOT_H), 14.0, 6.0)
     xmin, xmax = matrix.x_limits
     ymin, ymax = matrix.y_limits
     x_span = max(xmax - xmin, 1e-9)
     y_span = max(ymax - ymin, 1e-9)
     plot_w = float(PLOT_W)
     plot_h = float(PLOT_H)
-    font_px = 12 if len(matrix.items) > 18 else 13
-    point_r = 11.0
-    gap = 5.0
+    font_px = 12
+    point_r = 14.0
+    gap = 6.0
+    x_kind = axis_kind([item.x for item in matrix.items])
+    y_kind = axis_kind([item.y for item in matrix.items])
     specs: list[tuple[str, float, float, float, float]] = []
     for item in matrix.items:
-        text = chart_name(item.name)
-        width = max(len(text), 1) * (font_px * 1.02) + 10
-        height = font_px + 10
+        name_line, detail_line = point_caption_lines(item, matrix, x_kind, y_kind)
+        text = f"{name_line}\n{detail_line}"
+        width = max(len(name_line), len(detail_line), 1) * font_px + 14
+        height = font_px * 2 + 14
         anchor_x = (item.x - xmin) / x_span * plot_w
         anchor_y = (item.y - ymin) / y_span * plot_h
         specs.append((text, anchor_x, anchor_y, width, height))
@@ -573,7 +611,79 @@ def layout_point_labels(matrix: Matrix) -> LabelLayout:
         label = PlacedLabel(text, offset_x, offset_y, width, height, nudged, anchor_x, anchor_y)
         placed.append(label)
         chosen[index] = label
+    _separate_labels(placed, plot_w, plot_h, gap, point_r)
     return LabelLayout([chosen[index] for index in range(len(specs))], plot_w, plot_h, point_r, gap)
+
+
+def _point_clearance(label: PlacedLabel, dx: float, dy: float, point_r: float) -> float:
+    """大于 0 表示说明没有盖住自己的圆点。"""
+    clear_x = abs(dx) - (label.w / 2 + point_r)
+    clear_y = abs(dy) - (label.h / 2 + point_r)
+    return max(clear_x, clear_y)
+
+
+def _nudge_offset(label: PlacedLabel, axis: str, sign: float, amount: float, point_r: float) -> bool:
+    """往 sign 方向推。如果会把说明压回自己的圆点，就不动。"""
+    updated_x = label.dx + (sign * amount if axis == "x" else 0)
+    updated_y = label.dy + (sign * amount if axis == "y" else 0)
+    before = _point_clearance(label, label.dx, label.dy, point_r)
+    after = _point_clearance(label, updated_x, updated_y, point_r)
+    if after < before - 0.1 and after < 4:
+        return False
+    label.dx = updated_x
+    label.dy = updated_y
+    return True
+
+
+def _separate_labels(labels: list[PlacedLabel], plot_w: float, plot_h: float, gap: float, point_r: float) -> None:
+    """把仍然叠在一起的说明轻轻推开，并保持在图内、避开圆点。"""
+    if len(labels) < 2:
+        return
+
+    def clamp_label(label: PlacedLabel) -> None:
+        center_x = min(max(label.anchor_px + label.dx, label.w / 2), plot_w - label.w / 2)
+        center_y = min(max(label.anchor_py + label.dy, label.h / 2), plot_h - label.h / 2)
+        label.dx = center_x - label.anchor_px
+        label.dy = center_y - label.anchor_py
+
+    for _ in range(48):
+        moved = False
+        for index, label in enumerate(labels):
+            center_x = label.anchor_px + label.dx
+            center_y = label.anchor_py + label.dy
+            for other in labels[index + 1 :]:
+                other_x = other.anchor_px + other.dx
+                other_y = other.anchor_py + other.dy
+                overlap_x = (label.w + other.w) / 2 + gap - abs(center_x - other_x)
+                overlap_y = (label.h + other.h) / 2 + gap - abs(center_y - other_y)
+                if overlap_x <= 0 or overlap_y <= 0:
+                    continue
+                horizontal = overlap_x <= overlap_y
+                if horizontal:
+                    sign = 1 if other_x >= center_x else -1
+                    amount = overlap_x + 2
+                    axis = "x"
+                else:
+                    sign = 1 if other_y >= center_y else -1
+                    amount = overlap_y + 2
+                    axis = "y"
+                other_moved = _nudge_offset(other, axis, sign, amount, point_r)
+                label_moved = _nudge_offset(label, axis, -sign, amount, point_r)
+                if not other_moved and not label_moved:
+                    other_axis = "y" if axis == "x" else "x"
+                    other_sign = 1 if (other.dy if other_axis == "y" else other.dx) >= 0 else -1
+                    label_sign = 1 if (label.dy if other_axis == "y" else label.dx) >= 0 else -1
+                    if other_sign == label_sign:
+                        other_sign *= -1
+                    other_moved = _nudge_offset(other, other_axis, other_sign, 18, point_r)
+                    label_moved = _nudge_offset(label, other_axis, label_sign, 18, point_r)
+                moved = moved or other_moved or label_moved
+        for label in labels:
+            clamp_label(label)
+            if abs(label.dx) > 10 or abs(label.dy) > 10:
+                label.nudged = True
+        if not moved:
+            break
 
 
 def label_issues(layout: LabelLayout) -> list[str]:
@@ -715,14 +825,17 @@ def build_figure(matrix: Matrix) -> go.Figure:
                 fillcolor=spec.fill,
                 line=dict(width=0),
                 layer="below",
+                opacity=1,
             )
         )
     for shape in (
         dict(type="line", x0=x_mean, x1=x_mean, y0=ymin, y1=ymax),
         dict(type="line", x0=xmin, x1=xmax, y0=y_mean, y1=y_mean),
     ):
-        shape["line"] = dict(color=PALETTE["cross"], width=1.25, dash="dash")
-        shape["layer"] = "below"
+        shape["line"] = dict(color=PALETTE["cross"], width=3, dash="solid")
+        # simple_white 的形状默认只有 0.3 透明度，十字线会发虚。
+        shape["opacity"] = 1
+        shape["layer"] = "above"
         shapes.append(shape)
 
     figure = go.Figure()
@@ -734,20 +847,22 @@ def build_figure(matrix: Matrix) -> go.Figure:
             marker=dict(size=8, color=PALETTE["card"], line=dict(color=PALETTE["cross"], width=1.6)),
             hovertemplate=(
                 "平均值<br>"
-                + html.escape(matrix.x_name)
-                + f" {fmt_num(x_mean)}<br>"
-                + html.escape(matrix.y_name)
-                + f" {fmt_num(y_mean)}<extra></extra>"
+                + html.escape(axis_phrase(matrix.x_name, x_mean, axis_kind([item.x for item in matrix.items])))
+                + "<br>"
+                + html.escape(axis_phrase(matrix.y_name, y_mean, axis_kind([item.y for item in matrix.items])))
+                + "<extra></extra>"
             ),
             showlegend=False,
             name="mean",
         )
     )
+    x_kind = axis_kind([item.x for item in matrix.items])
+    y_kind = axis_kind([item.y for item in matrix.items])
     customdata = [
         [
             item.name,
-            fmt_num(item.x),
-            fmt_num(item.y),
+            axis_phrase(matrix.x_name, item.x, x_kind),
+            axis_phrase(matrix.y_name, item.y, y_kind),
             quadrant_title(QUADRANT_SPECS[item.key], matrix.x_name, matrix.y_name),
         ]
         for item in matrix.items
@@ -758,17 +873,14 @@ def build_figure(matrix: Matrix) -> go.Figure:
             y=[item.y for item in matrix.items],
             mode="markers",
             marker=dict(
-                size=14 if len(matrix.items) <= 18 else 11,
+                size=17 if len(matrix.items) <= 18 else 13,
                 color=[QUADRANT_SPECS[item.key].dot for item in matrix.items],
-                line=dict(width=2, color=PALETTE["card"]),
+                line=dict(width=2.4, color=PALETTE["card"]),
             ),
             customdata=customdata,
             hovertemplate=(
                 "<b>%{customdata[0]}</b><br>"
-                + html.escape(matrix.x_name)
-                + " %{customdata[1]}<br>"
-                + html.escape(matrix.y_name)
-                + " %{customdata[2]}<br>"
+                + "%{customdata[1]}<br>%{customdata[2]}<br>"
                 + "<span style='color:#6F685F'>%{customdata[3]}</span><extra></extra>"
             ),
             showlegend=False,
@@ -810,17 +922,17 @@ def build_figure(matrix: Matrix) -> go.Figure:
                 ayref="pixel",
                 xanchor="center",
                 yanchor="middle",
-                text=html.escape(label.name),
-                showarrow=bool(label.nudged),
+                text="<br>".join(html.escape(line) for line in label.name.split("\n")),
+                showarrow=True,
                 arrowhead=0,
-                arrowwidth=1,
-                arrowcolor="rgba(143, 135, 124, 0.7)",
-                standoff=12,
-                startstandoff=2,
-                font=dict(family=PLOTLY_FONT, size=13 if len(matrix.items) <= 18 else 12, color=PALETTE["ink"]),
+                arrowwidth=1.1,
+                arrowcolor="rgba(30, 42, 36, 0.45)",
+                standoff=14,
+                startstandoff=3,
+                font=dict(family=PLOTLY_FONT, size=12, color=PALETTE["ink"]),
                 align="center",
-                bgcolor="rgba(255,252,248,0.92)" if label.nudged else "rgba(255,252,248,0.8)",
-                borderpad=3,
+                bgcolor="rgba(255,252,248,0.94)",
+                borderpad=4,
             )
         )
     figure.update_layout(
@@ -1048,8 +1160,10 @@ def sidebar_brand_html() -> str:
 
 def stats_html(matrix: Matrix) -> str:
     count = str(len(matrix.items))
-    x_mean = fmt_num(matrix.x_mean)
-    y_mean = fmt_num(matrix.y_mean)
+    x_kind = axis_kind([item.x for item in matrix.items])
+    y_kind = axis_kind([item.y for item in matrix.items])
+    x_mean = format_axis_value(matrix.x_mean, x_kind) if matrix.x_mean is not None else "—"
+    y_mean = format_axis_value(matrix.y_mean, y_kind) if matrix.y_mean is not None else "—"
     cards = [
         ("有效品项", count),
         (f"{matrix.x_name} · 均值", x_mean),
@@ -1080,7 +1194,7 @@ def notice_html(matrix: Matrix, banner: str | None) -> str:
 def chart_head_html(matrix: Matrix) -> str:
     return (
         '<div class="section-head"><h2>分布</h2>'
-        f"<p>虚线是「{html.escape(matrix.x_name)}」和「{html.escape(matrix.y_name)}」的平均值。</p></div>"
+        f"<p>实线是「{html.escape(matrix.x_name)}」和「{html.escape(matrix.y_name)}」的平均值。</p></div>"
     )
 
 
@@ -1092,10 +1206,12 @@ def cards_html(matrix: Matrix) -> str:
         title = html.escape(quadrant_title(spec, matrix.x_name, matrix.y_name))
         hint = html.escape(quadrant_hint(spec.key, matrix.x_name, matrix.y_name))
         if items:
+            x_kind = axis_kind([item.x for item in matrix.items])
+            y_kind = axis_kind([item.y for item in matrix.items])
             rows = "".join(
                 "<div class='prow'>"
                 f"<span class='pname'>{html.escape(item.name)}</span>"
-                f"<span class='pmeta'>{html.escape(fmt_num(item.x))} · {html.escape(fmt_num(item.y))}</span>"
+                f"<span class='pmeta'>{html.escape(format_axis_value(item.x, x_kind))} · {html.escape(format_axis_value(item.y, y_kind))}</span>"
                 "</div>"
                 for item in items
             )

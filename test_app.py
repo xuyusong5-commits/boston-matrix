@@ -36,6 +36,39 @@ class MatrixLogicTest(unittest.TestCase):
         self.assertIn("高复购", texts)
         self.assertIn("高坪效", texts)
         self.assertIn("手工柠檬茶", texts)
+        self.assertIn("复购8.6%", texts)
+        self.assertIn("坪效66%", texts)
+
+    def test_crosshair_is_solid_and_point_labels_include_both_axes(self) -> None:
+        matrix = app.build_matrix(app.sample_frame(), "点击率", "毛利率")
+        figure = app.build_figure(matrix)
+        lines = [shape for shape in figure.layout.shapes if shape.type == "line"]
+        self.assertEqual(len(lines), 2)
+        for line in lines:
+            self.assertEqual(line.line.dash, "solid")
+            self.assertGreaterEqual(line.line.width, 2.4)
+            self.assertEqual(line.opacity, 1)
+        texts = " ".join(annotation.text or "" for annotation in figure.layout.annotations)
+        self.assertIn("手工柠檬茶<br>点击率8.6%，毛利率66%", texts)
+        self.assertIn("可乐<br>点击率9%，毛利率22%", texts)
+
+    def test_percent_formatting_follows_the_value_scale(self) -> None:
+        self.assertEqual(app.axis_kind([0.13, 0.55]), "proportion")
+        self.assertEqual(app.axis_kind([8.6, 66]), "percent")
+        self.assertEqual(app.axis_kind([200, 800]), "number")
+        self.assertEqual(app.format_axis_value(0.13, "proportion"), "13%")
+        self.assertEqual(app.format_axis_value(8.6, "percent"), "8.6%")
+        self.assertEqual(app.format_axis_value(1200, "number"), "1,200")
+        counts = app.build_matrix(
+            pd.DataFrame({"name": ["甲", "乙"], "x": [200, 800], "y": [3, 9]}),
+            "月销量",
+            "评分",
+        )
+        figure = app.build_figure(counts)
+        texts = " ".join(annotation.text or "" for annotation in figure.layout.annotations)
+        self.assertIn("月销量200", texts)
+        self.assertNotIn("月销量200%", texts)
+        self.assertIn("评分3%", texts)
 
     def test_ties_on_the_mean_fall_to_the_low_side(self) -> None:
         frame = pd.DataFrame({"name": ["甲", "乙"], "x": [1, 1], "y": [1, 3]})
@@ -146,7 +179,7 @@ class PageWiringTest(unittest.TestCase):
         self.assertFalse(self.at.exception, self.at.exception)
         blob = self._blob()
         self.assertIn("高复购率 · 高毛利率", blob)
-        self.assertIn("虚线是「复购率」和「毛利率」的平均值", blob)
+        self.assertIn("实线是「复购率」和「毛利率」的平均值", blob)
 
     def test_clear_and_sample_and_added_row_update_the_lists(self) -> None:
         self._click("清空表格")
